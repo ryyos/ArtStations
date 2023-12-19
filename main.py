@@ -7,7 +7,7 @@ class Main:
 
     def main(self):
         # self.__parser.extract_data(search="anime", page=1)
-        self.__parser.curl()
+        self.__parser.extract_data(page=None, search=None)
 
 if __name__ == '__main__':
     main = Main()

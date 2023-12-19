@@ -1,14 +1,6 @@
 import requests
-
-from selenium import webdriver
-from selenium.webdriver import Chrome
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
-from selenium_stealth import stealth
-
+import os
+import urllib.request
 from pyquery import PyQuery
 from fake_useragent import FakeUserAgent
 from icecream import ic
@@ -19,33 +11,28 @@ class Parser:
         self.__user_agent = FakeUserAgent()
         self.__writer = Writer()
         self.__api = "https://www.artstation.com/api/v2/search/projects.json"
-        self.__config = Options()
-        self.__apk = Service(executable_path='libs/utils/chromedriver.exe')
-        # self.__config.add_argument('--headless')
-
-        self.__driver = webdriver.Chrome(service=self.__apk, options=self.__config)
-        stealth(self.__driver,
-            languages=["en-US", "en"],
-            vendor="Google Inc.",
-            platform="Win32",
-            webgl_vendor="Intel Inc.",
-            renderer="Intel Iris OpenGL Engine",
-            fix_hairline=True,
-        )
 
     
-    def curl(self):
-        self.__driver.get(url='https://www.artstation.com/artwork/wXVeg')
+    def curl(self, url: str, path: str):
 
-        WebDriverWait(self.__driver, 240).until(EC.presence_of_element_located((By.XPATH, '/html/body/div[2]/app-root/ng-component/project-view/div/div/main/div/project-asset[1]')))
+        image = requests.get(url=url)
+        ic(image)
+        with open(path, 'wb') as f:
+            f.write(image.content)
 
-        body = PyQuery(self.__driver.page_source)
-        self.__writer.exstr(path='data/main.html', content=str(body))
-        self.__driver.close()
-        
-        
+
+
+    def filter_url(self, url: str) -> str:
+        pieces = url.split('/')
+        pieces[-2] = 'projects'
+        pieces[-1] = pieces[-1] + '.json'
+
+        return '/'.join(pieces)
+
+
     def extract_data(self, search: str, page: int):
-        urls: str = []
+        results: list(dict) = []
+
         cookies = {
             'PRIVATE-CSRF-TOKEN': '8Mc45%2BAa3VdsxFRFVYUIR5i8z7hLrkfGrY2z7bbaoKU%3D',
             'cf_clearance': 'rpQn91kojLw_ZCzrgjPmcW2TCd1gRi7S7lTHpnXgwrs-1702897948-0-1-887ef6bc.128a1587.df7fa95c-0.2.1702897948',
@@ -72,27 +59,34 @@ class Parser:
             "additional_fields":[]
             }
 
-        cookies_in = {
-            'PRIVATE-CSRF-TOKEN': '8Mc45%2BAa3VdsxFRFVYUIR5i8z7hLrkfGrY2z7bbaoKU%3D',
-            'cf_clearance': '0hkzwZd77QMc1RnuvpNDXIKdqhaWc3Np9K1ulHXPd5E-1702904879-0-1-887ef6bc.d47d7db2.df7fa95c-0.2.1702904879',
-            '__stripe_mid': '0adecf01-7471-434e-aa12-6c2d33cbb216fd19aa',
-            'g_state': '{"i_p":1702991297656,"i_l":2}',
-            'visitor-uuid': 'fbf18513-e803-4f3e-8166-571b2a6f59ff',
-            'referrer-host': 'www.google.com',
-            '__cf_bm': 'AQuuZs7pOgL1WXeUbQkligdU_B6me9p.wSiaPhzSgsI-1702904622-1-AVztFJVbvxr7WXj1b6VBcAi2qiEsWZuDZgF/J22jCvJNpqJlOXvf2KLug9KxvGo419MH6XvG+7bwZafjFrG+H8RgSnf8K2vEyRw4Es+noq22',
-            '__stripe_sid': 'c7956d65-b70f-4efe-b32c-77f85a1615a6693ebc'
-        }
-
-
+        self.filter_url(url='https://www.artstation.com/artwork/wXVeg')
         response = requests.post(self.__api, data=payload, headers=headers, cookies=cookies)
-        ic(response)
-        # self.__writer.ex(path=f"data/{search.replace(' ', '_')}.json", content=response.json())
-
+        
         for url in response.json()['data']:
-            urls.append(url.get('url'))
-            ic(url.get('url'))
-            response = requests.get(url.get('url'), headers={"User-Agent": self.__user_agent.random}, cookies=cookies_in)
-            ic(response)
-            break
+            response = requests.get(url=self.filter_url(url=url['url']), headers={"User-Agent": self.__user_agent.random})
+            body = response.json()
+            temporary = {
+                'title': body.get('title'),
+                'views': body.get('views_count'),
+                'likes': body.get('likes_count'),
+                'created': body.get('created_at'),
+                'update': body.get('updated_at'),
+                'url': body.get('permalink'),
+                'publish': body.get('published_at'),
+                'assets': []
+            }
+            os.mkdir(f'data/image/{body.get("title").replace(" ", "_")}')
+            for id,one in enumerate(body.get('assets')):
 
-        # self.__writer.ex(path=f"data/url_{search.replace(' ', '_')}.json", content=urls)
+                self.curl(url=one.get('image_url'), path=f'data/image/{body.get("title")}/image{id}.jpg')
+
+                temporary['assets'].append({
+                        'title': one.get('title'),
+                        'width': one.get('width'),
+                        'height': one.get('height'),
+                        'image_url': one.get('image_url')
+                    })
+                
+            results.append(temporary)
+            self.__writer.ex(path=f"data/json/title/{body.get('title').replace(' ', '_')}.json", content=temporary)
+
